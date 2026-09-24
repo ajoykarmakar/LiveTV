@@ -12,7 +12,7 @@ import okhttp3.Request
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-class PlaylistRepository(private val context: Context) {
+class PlaylistRepository(private val context: Context, private val engagementStore: EngagementStore) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
@@ -63,7 +63,21 @@ class PlaylistRepository(private val context: Context) {
             try {
                 val jsonStr = cacheFile.readText()
                 val cachedGroups = Json.decodeFromString<List<ChannelGroup>>(jsonStr)
-                _channelsFlow.value = cachedGroups
+                // We re-sort from cache on cold boot to ensure engagement score is applied
+                // because engagement score could have updated since last json caching.
+                val updatedGroups = cachedGroups.map { group ->
+                    group.copy(
+                        channels = group.channels.map { ch ->
+                            ch.copy(engagementScore = engagementStore.getScore(ch.name))
+                        }.sortedWith(compareByDescending<Channel> { it.engagementScore }.thenBy { it.name })
+                    )
+                }.map { group ->
+                    group.copy(score = group.channels.map { it.engagementScore }.sum())
+                }.sortedWith(compareByDescending<ChannelGroup> { it.score }
+                    .thenBy { getFolderBasePriority(it.title) }
+                    .thenBy { it.title })
+
+                _channelsFlow.value = updatedGroups
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -77,7 +91,7 @@ class PlaylistRepository(private val context: Context) {
             
             if (response.isSuccessful) {
                 response.body?.byteStream()?.use { stream ->
-                    val groups = M3uParser.parse(stream)
+                    val groups = M3uParser.parse(stream, engagementStore)
                     
                     // 4. Silent UI Update
                     _channelsFlow.value = groups
@@ -95,6 +109,21 @@ class PlaylistRepository(private val context: Context) {
             }
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+    
+    private fun getFolderBasePriority(folder: String): Int {
+        return when (folder.uppercase()) {
+            "STAR" -> 1
+            "SONY" -> 2
+            "ZEE" -> 3
+            "COLORS" -> 4
+            "DD" -> 5
+            "SUN" -> 6
+            "NEWS18" -> 7
+            "ABP" -> 8
+            "OTHERS" -> 99
+            else -> 10
         }
     }
 }

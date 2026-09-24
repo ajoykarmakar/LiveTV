@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlin.serialization)
+    // removed alias(libs.plugins.kotlin.android) which causes conflict because android block implicitly adds it, or another plugin did.
 }
 
 android {
@@ -65,6 +66,10 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     
-    // Coil
+    // Coil & SVG
     implementation(libs.coil.compose)
+    implementation(libs.coil.svg)
+
+    // DataStore
+    implementation(libs.androidx.datastore.preferences)
 }

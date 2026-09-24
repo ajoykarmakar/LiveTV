@@ -18,20 +18,25 @@ import coil.ImageLoader
 import coil.compose.LocalImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import coil.decode.SvgDecoder
 import androidx.compose.runtime.CompositionLocalProvider
 import com.clean.livetv.data.PlaylistRepository
+import com.clean.livetv.data.EngagementStore
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun LiveTvApp() {
     val context = LocalContext.current
     
-    // Strict memory cap for Coil
+    // Strict memory cap for Coil (10%) and SVG Support
     val imageLoader = remember {
         ImageLoader.Builder(context)
+            .components {
+                add(SvgDecoder.Factory())
+            }
             .memoryCache {
                 MemoryCache.Builder(context)
-                    .maxSizePercent(0.15) // Max 15% of available memory for images
+                    .maxSizePercent(0.10) // Max 10% of available memory to prevent OOM
                     .build()
             }
             .diskCache {
@@ -43,7 +48,8 @@ fun LiveTvApp() {
             .build()
     }
 
-    val repository = remember { PlaylistRepository(context) }
+    val engagementStore = remember { EngagementStore(context) }
+    val repository = remember { PlaylistRepository(context, engagementStore) }
     
     LaunchedEffect(Unit) {
         repository.loadAndSync()
@@ -58,7 +64,7 @@ fun LiveTvApp() {
                     .fillMaxSize()
                     .background(Color.Black)
             ) {
-                MainScreen(groups = groups)
+                MainScreen(groups = groups, engagementStore = engagementStore)
             }
         }
     }

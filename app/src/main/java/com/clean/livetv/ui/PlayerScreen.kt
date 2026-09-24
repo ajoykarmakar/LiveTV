@@ -1,6 +1,5 @@
 package com.clean.livetv.ui
 
-import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
@@ -11,7 +10,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -28,11 +26,13 @@ import kotlinx.coroutines.delay
 
 @OptIn(UnstableApi::class, ExperimentalTvMaterial3Api::class)
 @Composable
-fun PlayerScreen(channel: Channel, onBack: () -> Unit) {
+fun PlayerScreen(channel: Channel, onBack: (Long) -> Unit) {
     val context = LocalContext.current
     var currentVariantIndex by remember { mutableStateOf(0) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isBuffering by remember { mutableStateOf(true) }
+    
+    val startTime = remember { System.currentTimeMillis() }
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -56,7 +56,6 @@ fun PlayerScreen(channel: Channel, onBack: () -> Unit) {
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                // Try next variant on error
                 currentVariantIndex++
             }
 
@@ -75,13 +74,13 @@ fun PlayerScreen(channel: Channel, onBack: () -> Unit) {
     LaunchedEffect(currentVariantIndex, isBuffering) {
         if (isBuffering && currentVariantIndex < channel.variants.size) {
             delay(4000)
-            // If still buffering after 4 seconds, consider it a timeout and move to next variant
             currentVariantIndex++
         }
     }
 
     BackHandler {
-        onBack()
+        val watchSeconds = (System.currentTimeMillis() - startTime) / 1000L
+        onBack(watchSeconds)
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {

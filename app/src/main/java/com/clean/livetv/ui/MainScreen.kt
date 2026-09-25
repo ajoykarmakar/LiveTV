@@ -1,40 +1,65 @@
 package com.clean.livetv.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.*
+import coil.compose.SubcomposeAsyncImage
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.*
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.clean.livetv.R
 import com.clean.livetv.data.Channel
 import com.clean.livetv.data.ChannelGroup
 import com.clean.livetv.data.EngagementStore
+import com.clean.livetv.data.StreamHealthChecker
+import com.clean.livetv.data.StreamStatus
 import kotlinx.coroutines.launch
+
+
+@Composable
+fun AppBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF263238)) // A modern slate/blue-grey background
+            .systemBarsPadding(), // Ensures content does not overlap with status bar / navigation bar
+        content = content
+    )
+}
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun MainScreen(groups: List<ChannelGroup>, engagementStore: EngagementStore) {
     val coroutineScope = rememberCoroutineScope()
     var selectedChannel by remember { mutableStateOf<Channel?>(null) }
-    var selectedGroupIndex by remember { mutableStateOf(0) }
+    var selectedGroup by remember { mutableStateOf<ChannelGroup?>(null) }
 
     // Stability Rule: we only snapshot the display groups on initial load or cold start.
     val displayGroups = remember(groups) {
@@ -50,60 +75,64 @@ fun MainScreen(groups: List<ChannelGroup>, engagementStore: EngagementStore) {
         if (sortedByPopularity.isNotEmpty()) {
             newGroups.add(ChannelGroup("Most Watched", sortedByPopularity))
         }
-        newGroups.add(ChannelGroup("All Channels", allChannels.sortedBy { it.name }))
         newGroups.addAll(groups)
         
         newGroups
     }
 
-    if (selectedChannel != null) {
-        PlayerScreen(channel = selectedChannel!!) { watchSeconds ->
-            // On back pressed, record the time watched
-            coroutineScope.launch {
-                engagementStore.recordWatchTime(selectedChannel!!.name, watchSeconds)
-            }
-            selectedChannel = null
-        }
-    } else {
-        if (displayGroups.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = "Loading Channels...", color = Color.White)
-            }
-        } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Top Tab Bar inspired by the example image
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
-                    contentPadding = PaddingValues(horizontal = 32.dp, vertical = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    itemsIndexed(displayGroups) { index, group ->
-                        CategoryTab(
-                            title = group.title,
-                            isSelected = selectedGroupIndex == index,
-                            onFocus = { selectedGroupIndex = index },
-                            onClick = { selectedGroupIndex = index }
-                        )
-                    }
-                }
+    // Responsive calculations
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp
+    val isMobile = screenWidth < 600
+    val gridColumns = if (isMobile) 1 else if (screenWidth < 900) 2 else 4
+    val screenPadding = if (isMobile) 16.dp else 32.dp
+    val spacing = if (isMobile) 12.dp else 16.dp
 
-                // Main Grid
-                val currentGroup = displayGroups.getOrNull(selectedGroupIndex)
-                if (currentGroup != null) {
+    // Dynamic background for eye-catchy UI inspired by the image
+    AppBackground {
+        val currentChannel = selectedChannel
+        if (currentChannel != null) {
+            PlayerScreen(channel = currentChannel) { watchSeconds ->
+                coroutineScope.launch {
+                    engagementStore.recordWatchTime(currentChannel.name, watchSeconds)
+                }
+                selectedChannel = null
+            }
+        } else if (selectedGroup != null) {
+            GroupScreen(
+                group = selectedGroup!!,
+                onBack = { selectedGroup = null },
+                onChannelClick = { channel ->
+                    coroutineScope.launch {
+                        engagementStore.recordOpen(channel.name)
+                    }
+                    selectedChannel = channel
+                }
+            )
+        } else {
+            if (displayGroups.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(text = "Loading Channels...", color = Color.White)
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 160.dp),
-                        contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 8.dp, bottom = 32.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        columns = GridCells.Fixed(gridColumns),
+                        contentPadding = PaddingValues(start = screenPadding, top = 16.dp, end = screenPadding, bottom = screenPadding),
+                        horizontalArrangement = Arrangement.spacedBy(spacing),
+                        verticalArrangement = Arrangement.spacedBy(spacing),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(currentGroup.channels) { channel ->
-                            ChannelCard(channel = channel) {
-                                coroutineScope.launch {
-                                    engagementStore.recordOpen(channel.name)
-                                }
-                                selectedChannel = channel
+                        items(displayGroups) { group ->
+                            DashboardCard(
+                                title = group.title,
+                                subtitle = "${group.channels.size} Channels",
+                                logoUrl = group.channels.firstOrNull()?.logoUrl ?: "",
+                                folderNameForSystemIcon = group.title,
+                                isMobile = isMobile
+                            ) {
+                                selectedGroup = group
                             }
                         }
                     }
@@ -113,117 +142,253 @@ fun MainScreen(groups: List<ChannelGroup>, engagementStore: EngagementStore) {
     }
 }
 
+@Composable
+fun GroupScreen(
+    group: ChannelGroup,
+    onBack: () -> Unit,
+    onChannelClick: (Channel) -> Unit
+) {
+    BackHandler(onBack = onBack)
+    
+    // Responsive calculations
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp
+    val isMobile = screenWidth < 600
+    val gridColumns = if (isMobile) 1 else if (screenWidth < 900) 2 else 4
+    val screenPadding = if (isMobile) 16.dp else 32.dp
+    val spacing = if (isMobile) 12.dp else 16.dp
+
+    AppBackground {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.padding(start = screenPadding, top = if (isMobile) 16.dp else 24.dp, bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.padding(end = 16.dp),
+                    colors = IconButtonDefaults.colors(
+                        // High contrast against dark background
+                        contentColor = Color.White,
+                        focusedContentColor = Color.Black,
+                        focusedContainerColor = Color.White
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back"
+                    )
+                }
+                MediaLogo(
+                    name = group.title,
+                    logoUrl = group.channels.firstOrNull()?.logoUrl ?: "",
+                    modifier = Modifier.size(if (isMobile) 32.dp else 40.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = group.title,
+                        style = if (isMobile) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+            
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(gridColumns),
+                contentPadding = PaddingValues(start = screenPadding, top = 16.dp, end = screenPadding, bottom = screenPadding),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+                verticalArrangement = Arrangement.spacedBy(spacing),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(group.channels) { channel ->
+                    DashboardCard(
+                        title = channel.name,
+                        subtitle = null,
+                        logoUrl = channel.logoUrl,
+                        channel = channel,
+                        isMobile = isMobile
+                    ) {
+                        onChannelClick(channel)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun CategoryTab(
+fun DashboardCard(
     title: String,
-    isSelected: Boolean,
-    onFocus: () -> Unit,
+    subtitle: String?,
+    logoUrl: String,
+    channel: Channel? = null,
+    folderNameForSystemIcon: String? = null,
+    isMobile: Boolean = false,
     onClick: () -> Unit
 ) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.onFocusChanged { state ->
-            if (state.isFocused) {
-                onFocus()
-            }
-        },
-        shape = ClickableSurfaceDefaults.shape(shape = RoundedCornerShape(50)),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color.White,
-            focusedContainerColor = MaterialTheme.colorScheme.inverseSurface,
-            focusedContentColor = MaterialTheme.colorScheme.inverseOnSurface
+    var streamStatus by remember { mutableStateOf(StreamStatus.CHECKING) }
+
+    LaunchedEffect(channel) {
+        if (channel != null) {
+            streamStatus = StreamStatus.CHECKING
+            val isOnline = StreamHealthChecker.checkChannel(channel)
+            streamStatus = if (isOnline) StreamStatus.ONLINE else StreamStatus.OFFLINE
+        }
+    }
+
+    Card(
+        onClick = { if (!isMobile) onClick() },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (isMobile) 80.dp else 110.dp) // Dynamic height
+            .then(if (isMobile) Modifier.clickable { onClick() } else Modifier),
+        shape = CardDefaults.shape(shape = RoundedCornerShape(12.dp)),
+        scale = CardDefaults.scale(focusedScale = 1.05f),
+        glow = CardDefaults.glow(focusedGlow = Glow(elevationColor = Color.White.copy(alpha = 0.3f), elevation = 8.dp)),
+        colors = CardDefaults.colors(
+            containerColor = Color(0xFF1E242B),
+            focusedContainerColor = Color(0xFF2C353F)
+        ),
+        border = CardDefaults.border(
+            border = Border(border = BorderStroke(1.dp, Color(0xFF37474F))),
+            focusedBorder = Border(border = BorderStroke(2.dp, Color.White))
         )
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxSize().padding(horizontal = if (isMobile) 16.dp else 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Start
         ) {
-            FolderLogo(folderName = title)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium
-            )
-        }
-    }
-}
-
-@Composable
-fun FolderLogo(folderName: String) {
-    val upper = folderName.uppercase()
-    val localRes = when (upper) {
-        "STAR" -> R.drawable.logo_star
-        "SONY" -> R.drawable.logo_sony
-        else -> null // Will trigger fallback
-    }
-
-    if (localRes != null) {
-        AsyncImage(
-            model = localRes,
-            contentDescription = null,
-            modifier = Modifier.size(24.dp)
-        )
-    } else {
-        // Final Fallback: Stylized typographic monogram badge
-        val letter = upper.firstOrNull()?.toString() ?: "O"
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(
-                    brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFF6A11CB), Color(0xFF2575FC))
-                    )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = letter,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
-fun ChannelCard(channel: Channel, onClick: () -> Unit) {
-    Card(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1.5f), // Width / Height ratio for TV cards
-        shape = CardDefaults.shape(shape = RoundedCornerShape(12.dp)),
-        colors = CardDefaults.colors(
-            containerColor = Color(0xFF1E2124) // Dark card background
-        )
-    ) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (channel.logoUrl.isNotEmpty()) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(channel.logoUrl)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = channel.name,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                        .clip(RoundedCornerShape(8.dp))
+            Box {
+                MediaLogo(
+                    name = folderNameForSystemIcon ?: title,
+                    logoUrl = logoUrl,
+                    modifier = Modifier.size(if (isMobile) 40.dp else 42.dp)
                 )
-            } else {
+                
+                // Status Indicator Badge (Only for Channels)
+                if (channel != null) {
+                    val statusColor = when (streamStatus) {
+                        StreamStatus.ONLINE -> Color(0xFF4CAF50) // Green
+                        StreamStatus.OFFLINE -> Color(0xFFF44336) // Red
+                        StreamStatus.CHECKING -> Color.Gray
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .align(Alignment.TopEnd)
+                            .offset(x = 4.dp, y = (-4).dp)
+                            .clip(CircleShape)
+                            .background(statusColor)
+                            .border(1.5.dp, Color(0xFF1E242B), CircleShape)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(20.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = channel.name,
+                    text = title,
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
-                    modifier = Modifier.padding(16.dp)
+                    fontWeight = FontWeight.Medium,
+                    maxLines = if (subtitle != null) 1 else 2,
+                    overflow = TextOverflow.Ellipsis
                 )
+                if (subtitle != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else if (channel != null) {
+                    // Show text status for channels
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = when (streamStatus) {
+                            StreamStatus.ONLINE -> "Online"
+                            StreamStatus.OFFLINE -> "Offline"
+                            StreamStatus.CHECKING -> "Checking..."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when (streamStatus) {
+                            StreamStatus.ONLINE -> Color(0xFF4CAF50)
+                            StreamStatus.OFFLINE -> Color(0xFFF44336)
+                            StreamStatus.CHECKING -> Color.Gray
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
+        }
+    }
+}
+
+@Composable
+fun MediaLogo(name: String, logoUrl: String, modifier: Modifier = Modifier) {
+    // Assign specific icons to utility folders
+    val systemIcon = when (name) {
+        "All Channels" -> Icons.Default.PlayArrow
+        "Most Watched" -> Icons.Default.Star
+        "Kids & Cartoons" -> Icons.Default.Face
+        "Other Channels", "Others", "Z Other Channels" -> Icons.AutoMirrored.Filled.List
+        else -> null
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = 0.2f)), // Solid white for network logos
+        contentAlignment = Alignment.Center
+    ) {
+        if (systemIcon != null) {
+            Icon(
+                imageVector = systemIcon,
+                contentDescription = null,
+                tint = Color(0xFF1E242B),
+                modifier = Modifier.size(38.dp)
+            )
+        } else if (logoUrl.isNotEmpty()) {
+            SubcomposeAsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(logoUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().padding(2.dp),
+                loading = {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(text = "...", color = Color.Gray, fontSize = 12.sp)
+                    }
+                },
+                error = {
+                    val letter = if (name.isNotEmpty()) name.uppercase().first().toString() else "O"
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = letter,
+                            color = Color.Black,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            )
+        } else {
+            // Final Fallback: Stylized monogram
+            val letter = if (name.isNotEmpty()) name.uppercase().first().toString() else "O"
+            Text(
+                text = letter,
+                color = Color.Black,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }

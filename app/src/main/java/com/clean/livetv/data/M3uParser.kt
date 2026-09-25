@@ -46,7 +46,10 @@ object M3uParser {
         val mergedChannels = groupedByName.map { (name, channelList) ->
             val first = channelList.first()
             val allVariants = channelList.flatMap { it.variants }.sortedByDescending { parseResInt(it.resolution) }
-            val logo = first.logoUrl.ifEmpty { channelList.find { it.logoUrl.isNotEmpty() }?.logoUrl ?: "" }
+            
+            // Override with Wikipedia Logo if available, else fallback to M3U logo
+            val wikiLogo = getChannelWikipediaLogo(name)
+            val logo = wikiLogo ?: first.logoUrl.ifEmpty { channelList.find { it.logoUrl.isNotEmpty() }?.logoUrl ?: "" }
             
             val group = guessGroup(name)
             val score = engagementStore.getScore(name)
@@ -63,20 +66,43 @@ object M3uParser {
         // Apply folder and channel default + engagement sorting
         val groups = mergedChannels.groupBy { it.groupTitle }
         
-        return groups.map { (title, list) ->
-            // Sort channels inside folder: Engagement > Flagship > Name
-            val sortedChannels = list.sortedWith(compareByDescending<Channel> { it.engagementScore }
+        val finalGroups = mutableListOf<ChannelGroup>()
+        val otherChannelsList = mutableListOf<Channel>()
+
+        groups.forEach { (title, list) ->
+            if ((list.size == 1 && title != "Kids & Cartoons") || title == "Others" || title == "Other Channels") {
+                // Single-channel folders go into "Other Channels"
+                val updatedList = list.map { it.copy(groupTitle = "Z Other Channels") }
+                otherChannelsList.addAll(updatedList)
+            } else {
+                // Sort channels inside folder: Engagement > Flagship > Name
+                val sortedChannels = list.sortedWith(compareByDescending<Channel> { it.engagementScore }
+                    .thenByDescending { getChannelBasePriority(it.name) }
+                    .thenBy { it.name })
+                    
+                val folderScore = sortedChannels.map { it.engagementScore }.sum()
+                
+                finalGroups.add(ChannelGroup(
+                    title = title, 
+                    channels = sortedChannels,
+                    score = folderScore
+                ))
+            }
+        }
+
+        if (otherChannelsList.isNotEmpty()) {
+            val sortedOthers = otherChannelsList.sortedWith(compareByDescending<Channel> { it.engagementScore }
                 .thenByDescending { getChannelBasePriority(it.name) }
                 .thenBy { it.name })
-                
-            val folderScore = sortedChannels.map { it.engagementScore }.sum()
-            
-            ChannelGroup(
-                title = title, 
-                channels = sortedChannels,
-                score = folderScore
-            )
-        }.sortedWith(compareByDescending<ChannelGroup> { it.score }
+            val othersScore = sortedOthers.map { it.engagementScore }.sum()
+            finalGroups.add(ChannelGroup(
+                title = "Other Channels",
+                channels = sortedOthers,
+                score = othersScore
+            ))
+        }
+
+        return finalGroups.sortedWith(compareByDescending<ChannelGroup> { it.score }
             .thenBy { getFolderBasePriority(it.title) }
             .thenBy { it.title })
     }
@@ -88,15 +114,21 @@ object M3uParser {
     }
 
     private fun parseNameAndResolution(rawName: String): Pair<String, String> {
-        // Match [720p], (1080p), (FHD), (SD), (HD)
-        val regex = "(\\[.*?\\]|\\(.*?\\)|\\bFHD\\b|\\bHD\\b|\\bSD\\b)".toRegex(RegexOption.IGNORE_CASE)
-        val match = regex.find(rawName)
-        if (match != null) {
-            val resolution = match.value.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
-            val baseName = rawName.replace(match.value, "").trim()
-            return Pair(baseName, resolution)
-        }
-        return Pair(rawName, "unknown")
+        // First find the actual resolution
+        val resRegex = "((?:1080|720|480|360|240|144)p|\\bFHD\\b|\\bHD\\b|\\bSD\\b|\\b4K\\b)".toRegex(RegexOption.IGNORE_CASE)
+        val resMatch = resRegex.find(rawName)
+        val resolution = resMatch?.groupValues?.get(1) ?: "unknown"
+
+        // Remove EVERYTHING inside brackets or parentheses
+        var baseName = rawName.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "")
+        
+        // Remove standalone tags if they exist outside brackets
+        baseName = baseName.replace(Regex("\\b(FHD|HD|SD|4K)\\b", RegexOption.IGNORE_CASE), "")
+        
+        // Clean up any remaining hyphens and spaces
+        baseName = baseName.replace("-", "").replace(Regex("\\s+"), " ").trim()
+
+        return Pair(baseName, resolution)
     }
 
     private fun parseResInt(resString: String): Int {
@@ -110,7 +142,7 @@ object M3uParser {
     private fun guessGroup(channelName: String): String {
         val upper = channelName.uppercase()
         return when {
-            upper.startsWith("STAR ") || upper.startsWith("STAR") -> "Star"
+            upper.startsWith("STAR") -> "Star"
             upper.startsWith("SONY") -> "Sony"
             upper.startsWith("ZEE") -> "Zee"
             upper.startsWith("COLORS") -> "Colors"
@@ -118,34 +150,44 @@ object M3uParser {
             upper.startsWith("SUN ") || upper.startsWith("SUN") -> "Sun"
             upper.startsWith("NEWS18") -> "News18"
             upper.startsWith("ABP") -> "ABP"
+            upper.startsWith("ASIANET") -> "Asianet"
+            upper.startsWith("ETV") -> "ETV"
+            upper.startsWith("B4U") -> "B4U"
+            upper.startsWith("9X") -> "9X"
+            upper.startsWith("POLIMER") -> "Polimer"
+            upper.startsWith("KALAIGNAR") -> "Kalaignar"
+            upper.startsWith("JAYA") -> "Jaya"
             else -> {
-                // If it contains these words, maybe general grouping
-                if (upper.contains("NEWS") || upper.contains("AAJ TAK") || upper.contains("NDTV") || upper.contains("REPUBLIC")) return "News"
+                // Genre-based grouping if no specific brand matches
+                if (upper.contains("NEWS") || upper.contains("AAJ TAK") || upper.contains("NDTV") || upper.contains("REPUBLIC") || upper.contains("INDIA TV")) return "News"
                 if (upper.contains("SPORTS") || upper.contains("TEN ") || upper.contains("ESPN")) return "Sports"
                 if (upper.contains("MOVIE") || upper.contains("CINEMA") || upper.contains("PICTURES") || upper.contains("GOLD")) return "Movies"
-                if (upper.contains("MUSIC") || upper.contains("MTV") || upper.contains("VH1") || upper.contains("9XM") || upper.contains("9X ")) return "Music"
-                if (upper.contains("KIDS") || upper.contains("CARTOON") || upper.contains("POGO") || upper.contains("DISNEY") || upper.contains("NICK")) return "Kids"
-                if (upper.contains("DISCOVERY") || upper.contains("ANIMAL PLANET") || upper.contains("HISTORY") || upper.contains("NAT GEO")) return "Infotainment"
+                if (upper.contains("MUSIC") || upper.contains("MTV") || upper.contains("VH1") || upper.contains("9XM") || upper.contains("ZING")) return "Music"
+                if (upper.contains("KIDS") || upper.contains("CARTOON") || upper.contains("POGO") || upper.contains("DISNEY") || upper.contains("NICK") || upper.contains("CHUTTI")) return "Kids & Cartoons"
+                if (upper.contains("DISCOVERY") || upper.contains("ANIMAL PLANET") || upper.contains("HISTORY") || upper.contains("NAT GEO") || upper.contains("NATIONAL GEOGRAPHIC")) return "Infotainment"
                 
-                // Fallback to first word
-                upper.split(" ").firstOrNull() ?: "Others"
+                // Final Fallback: use the first word of the channel (Capitalized neatly)
+                val firstWord = channelName.split(" ").firstOrNull()?.lowercase()?.replaceFirstChar { it.uppercase() }
+                if (firstWord.isNullOrEmpty() || firstWord.length <= 2) "Other Channels" else firstWord
             }
         }
     }
 
     private fun getFolderBasePriority(folder: String): Int {
-        // Star > Sony > Zee > Colors > DD > Sun > News18 > ABP > Others
+        // Custom order: Star > Sony > Zee > Colors > Music > Kids & Cartoons > DD > Sun > News18 > ABP > Others
         return when (folder.uppercase()) {
             "STAR" -> 1
             "SONY" -> 2
             "ZEE" -> 3
             "COLORS" -> 4
-            "DD" -> 5
-            "SUN" -> 6
-            "NEWS18" -> 7
-            "ABP" -> 8
-            "OTHERS" -> 99
-            else -> 10
+            "MUSIC" -> 5
+            "KIDS & CARTOONS" -> 6
+            "DD" -> 7
+            "SUN" -> 8
+            "NEWS18" -> 9
+            "ABP" -> 10
+            "OTHER CHANNELS", "OTHERS" -> 99
+            else -> 20
         }
     }
 
@@ -155,5 +197,143 @@ object M3uParser {
         if (upper.contains("SPORTS") || upper.contains("PLUS") || upper.contains("TV")) return 10
         if (upper.contains("NEWS") || upper.contains("REGIONAL")) return 0
         return 5
+    }
+
+    private fun getChannelWikipediaLogo(channelName: String): String? {
+        // Match Indian television channels directly to their Wikipedia logos.
+        // Data sourced from https://en.wikipedia.org/wiki/Lists_of_television_channels_in_India
+        val cleanName = channelName.uppercase().trim()
+        val filename = when {
+            // Star Network
+            cleanName == "STAR PLUS" -> "Star_Plus_logo.svg"
+            cleanName == "STAR BHARAT" -> "Star_Bharat_logo.svg"
+            cleanName == "STAR UTSAV" -> "Star_Utsav_logo.png"
+            cleanName == "STAR GOLD" -> "Star_Gold_logo.svg"
+            cleanName == "STAR MOVIES" -> "Star_Movies_logo.svg"
+            cleanName == "STAR WORLD" -> "Star_World_logo.svg"
+            cleanName == "STAR SPORTS 1" -> "Star_Sports_1_logo.svg"
+            cleanName == "STAR SPORTS 2" -> "Star_Sports_2_logo.svg"
+            cleanName == "STAR SPORTS 3" -> "Star_Sports_3_logo.svg"
+            cleanName.startsWith("STAR SPORTS") -> "Star_Sports_Logo.svg"
+            cleanName == "STAR VIJAY" -> "Star_Vijay_logo.svg"
+            cleanName == "STAR JALSHA" -> "Star_Jalsha_logo.svg"
+            cleanName == "STAR PRAVAH" -> "Star_Pravah_logo.svg"
+            cleanName == "STAR MAA" -> "Star_Maa_logo.svg"
+            cleanName == "STAR SUVARNA" -> "Star_Suvarna_logo.svg"
+            cleanName == "ASIANET" -> "Asianet_logo.svg"
+
+            // Sony Network
+            cleanName == "SONY ENTERTAINMENT TELEVISION" || cleanName == "SET" -> "SET_India_logo.svg"
+            cleanName == "SONY SAB" || cleanName == "SAB TV" -> "Sony_SAB_logo.svg"
+            cleanName == "SONY PAL" -> "Sony_Pal_logo.svg"
+            cleanName == "SONY MAX" -> "Sony_Max_logo.svg"
+            cleanName == "SONY PIX" -> "Sony_PIX_logo.svg"
+            cleanName == "SONY SIX" -> "Sony_SIX_logo.svg"
+            cleanName.startsWith("SONY SPORTS") -> "Sony_Sports_Network_logo.svg"
+            cleanName == "SONY YAY" || cleanName == "SONY YAY!" -> "Sony_Yay_logo.svg"
+
+            // Zee Network
+            cleanName == "ZEE TV" -> "Zee_TV_logo.svg"
+            cleanName == "ZEE CINEMA" -> "Zee_Cinema_logo.svg"
+            cleanName == "ZEE BOLLYWOOD" -> "Zee_Bollywood_logo.svg"
+            cleanName == "ZEE ACTION" -> "Zee_Action_logo.svg"
+            cleanName == "ZEE ANMOL" -> "Zee_Anmol_logo.svg"
+            cleanName == "ZEE CAFE" -> "Zee_Cafe_logo.svg"
+            cleanName == "ZEE ZEST" -> "Zee_Zest_logo.svg"
+            cleanName == "ZEE NEWS" -> "Zee_News_logo.svg"
+            cleanName == "ZEE BUSINESS" -> "Zee_Business_logo.svg"
+            cleanName == "ZEE MARATHI" -> "Zee_Marathi_logo.svg"
+            cleanName == "ZEE BANGLA" -> "Zee_Bangla_logo.svg"
+            cleanName == "ZEE TAMIZH" -> "Zee_Tamil_logo.svg"
+            cleanName == "ZEE TELUGU" -> "Zee_Telugu_logo.svg"
+            cleanName == "ZEE KANNADA" -> "Zee_Kannada_logo.svg"
+            cleanName == "ZEE KERALAM" -> "Zee_Keralam_logo.svg"
+            cleanName == "&TV" || cleanName == "AND TV" -> "And_TV_logo.svg"
+            cleanName == "&PICTURES" || cleanName == "AND PICTURES" -> "Andpictures_logo.svg"
+
+            // Viacom18 / Colors
+            cleanName == "COLORS" || cleanName == "COLORS TV" -> "Colors_TV_logo.svg"
+            cleanName == "COLORS RISHTEY" -> "Colors_Rishtey_logo.svg"
+            cleanName == "COLORS CINEPLEX" -> "Colors_Cineplex_logo.svg"
+            cleanName == "COLORS INFINITY" -> "Colors_Infinity_logo.svg"
+            cleanName == "MTV" || cleanName == "MTV INDIA" -> "MTV_India_logo.svg"
+            cleanName == "MTV BEATS" -> "MTV_Beats_logo.svg"
+            cleanName == "VH1" || cleanName == "VH1 INDIA" -> "VH1_India_logo.svg"
+            cleanName == "NICKELODEON" || cleanName == "NICK" -> "Nickelodeon_logo.svg"
+            cleanName == "NICK JR" || cleanName == "NICK JR." -> "Nick_Jr_logo.svg"
+            cleanName == "SONIC" || cleanName == "SONIC NICKELODEON" -> "Sonic_Nickelodeon_logo.svg"
+            cleanName == "COLORS MARATHI" -> "Colors_Marathi_logo.svg"
+            cleanName == "COLORS KANNADA" -> "Colors_Kannada_logo.svg"
+            cleanName == "COLORS BANGLA" -> "Colors_Bangla_logo.svg"
+            cleanName == "COLORS GUJARATI" -> "Colors_Gujarati_logo.svg"
+
+            // News & Regional
+            cleanName == "AAJ TAK" -> "Aaj_Tak_logo.svg"
+            cleanName == "INDIA TODAY" -> "India_Today_logo.svg"
+            cleanName == "ABP NEWS" -> "ABP_News_logo.svg"
+            cleanName == "ABP MAJHA" -> "ABP_Majha_logo.svg"
+            cleanName == "ABP ANANDA" -> "ABP_Ananda_logo.svg"
+            cleanName == "NEWS18 INDIA" -> "News18_India_logo.svg"
+            cleanName == "CNN NEWS18" || cleanName == "CNN-NEWS18" -> "CNN-News18_logo.svg"
+            cleanName == "INDIA TV" -> "India_TV_logo.svg"
+            cleanName == "REPUBLIC TV" -> "Republic_TV_logo.svg"
+            cleanName == "REPUBLIC BHARAT" -> "Republic_Bharat_logo.svg"
+            cleanName == "NDTV 24X7" -> "NDTV_24x7_logo.svg"
+            cleanName == "NDTV INDIA" -> "NDTV_India_logo.svg"
+            cleanName == "TIMES NOW" -> "Times_Now_logo.svg"
+            cleanName == "MIRROR NOW" -> "Mirror_Now_logo.svg"
+            cleanName == "ET NOW" -> "ET_Now_logo.svg"
+            cleanName == "PTC PUNJABI" -> "PTC_Punjabi_Logo.png"
+
+            // Kids & Infotainment
+            cleanName == "CARTOON NETWORK" -> "Cartoon_Network_logo.svg"
+            cleanName == "POGO" || cleanName == "POGO TV" -> "Pogo_TV_logo.svg"
+            cleanName == "DISNEY CHANNEL" -> "Disney_Channel_logo.svg"
+            cleanName == "DISNEY JUNIOR" -> "Disney_Junior_logo.svg"
+            cleanName == "HUNGAMA TV" -> "Hungama_TV_logo.svg"
+            cleanName == "DISCOVERY CHANNEL" || cleanName == "DISCOVERY" -> "Discovery_Channel_logo.svg"
+            cleanName == "ANIMAL PLANET" -> "Animal_Planet_logo.svg"
+            cleanName == "TLC" -> "TLC_logo.svg"
+            cleanName == "NATIONAL GEOGRAPHIC" || cleanName == "NAT GEO" -> "National_Geographic_Logo.svg"
+            cleanName == "NAT GEO WILD" -> "Nat_Geo_Wild_logo.svg"
+            cleanName == "HISTORY TV18" -> "History_TV18_logo.svg"
+
+            // Sun & Southern
+            cleanName == "SUN TV" -> "Sun_TV_logo.svg"
+            cleanName == "KTV" -> "KTV_logo.svg"
+            cleanName == "SUN MUSIC" -> "Sun_Music_logo.svg"
+            cleanName == "SUN NEWS" -> "Sun_News_logo.svg"
+            cleanName == "CHUTTI TV" -> "Chutti_TV_logo.svg"
+            cleanName == "ADITHYA TV" -> "Adithya_TV_logo.svg"
+            cleanName == "GEMINI TV" -> "Gemini_TV_logo.svg"
+            cleanName == "UDAYA TV" -> "Udaya_TV_logo.svg"
+            cleanName == "SURYA TV" -> "Surya_TV_logo.svg"
+            cleanName.startsWith("ETV") -> "ETV_Network_logo.png"
+
+            // Music & Movies
+            cleanName == "9XM" -> "9XM_logo.png"
+            cleanName == "9X JALWA" -> "9X_Jalwa_logo.png"
+            cleanName == "B4U MOVIES" -> "B4U_Movies_logo.svg"
+            cleanName == "B4U MUSIC" -> "B4U_Music_logo.svg"
+            cleanName == "B4U KADAK" -> "B4U_Kadak_logo.svg"
+            cleanName == "BINDASS" -> "Bindass_logo.svg"
+            cleanName == "ZOOM" -> "Zoom_TV_logo.svg"
+
+            // Doordarshan
+            cleanName == "DD NATIONAL" -> "DD_National_logo.svg"
+            cleanName == "DD NEWS" -> "DD_News_logo.svg"
+            cleanName == "DD SPORTS" -> "DD_Sports_logo.svg"
+            cleanName == "DD BHARATI" -> "DD_Bharati_logo.svg"
+            cleanName == "DD KISAN" -> "DD_Kisan_logo.svg"
+            cleanName.startsWith("DD ") -> "Doordarshan_Logo.svg"
+
+            else -> null
+        }
+        
+        return if (filename != null) {
+            "https://en.wikipedia.org/wiki/Special:FilePath/$filename"
+        } else {
+            null
+        }
     }
 }

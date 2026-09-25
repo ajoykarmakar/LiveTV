@@ -19,9 +19,11 @@ import coil.compose.LocalImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.decode.SvgDecoder
+import okhttp3.OkHttpClient
 import androidx.compose.runtime.CompositionLocalProvider
 import com.clean.livetv.data.PlaylistRepository
 import com.clean.livetv.data.EngagementStore
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -30,7 +32,30 @@ fun LiveTvApp() {
     
     // Strict memory cap for Coil (10%) and SVG Support
     val imageLoader = remember {
+        val okHttpClient = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                var request = chain.request().newBuilder()
+                    .header("User-Agent", "LiveTVApp/1.0 (Android TV)")
+                    .build()
+                
+                var response = chain.proceed(request)
+                var tryCount = 0
+                while (!response.isSuccessful && tryCount < 3) {
+                    tryCount++
+                    response.close()
+                    try {
+                        Thread.sleep((1000 * tryCount).toLong())
+                    } catch (ignored: Exception) {}
+                    response = chain.proceed(request)
+                }
+                response
+            }
+            .build()
+            
         ImageLoader.Builder(context)
+            .okHttpClient(okHttpClient)
             .components {
                 add(SvgDecoder.Factory())
             }
@@ -45,6 +70,7 @@ fun LiveTvApp() {
                     .maxSizePercent(0.02)
                     .build()
             }
+            .crossfade(true)
             .build()
     }
 

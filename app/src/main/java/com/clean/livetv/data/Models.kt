@@ -14,7 +14,8 @@ data class Channel(
     val logoUrl: String,
     val groupTitle: String,
     val variants: List<ChannelVariant>, // High resolution to low resolution
-    val engagementScore: Float = 0f
+    val engagementScore: Float = 0f,
+    val hasHdOrHigher: Boolean = false // New flag to determine if HD badge should show
 )
 
 @Serializable

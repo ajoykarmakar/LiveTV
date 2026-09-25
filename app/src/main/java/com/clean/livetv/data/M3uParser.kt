@@ -70,7 +70,7 @@ object M3uParser {
         val otherChannelsList = mutableListOf<Channel>()
 
         groups.forEach { (title, list) ->
-            if ((list.size == 1 && title != "Kids & Cartoons") || title == "Others" || title == "Other Channels") {
+            if ((list.size == 1 && title != "Cartoon") || title == "Others" || title == "Other Channels") {
                 // Single-channel folders go into "Other Channels"
                 val updatedList = list.map { it.copy(groupTitle = "Z Other Channels") }
                 otherChannelsList.addAll(updatedList)
@@ -154,6 +154,11 @@ object M3uParser {
             return "Movies"
         }
 
+        // Prioritize Cartoons/Kids
+        if (upper.contains("KIDS") || upper.contains("CARTOON") || upper.contains("POGO") || upper.contains("DISNEY") || upper.contains("NICK") || upper.contains("CHUTTI")) {
+            return "Cartoon"
+        }
+
         return when {
             upper.startsWith("STAR") -> "Star"
             upper.startsWith("SONY") -> "Sony"
@@ -174,8 +179,7 @@ object M3uParser {
                 // Genre-based grouping if no specific brand matches
                 if (upper.contains("NEWS") || upper.contains("AAJ TAK") || upper.contains("NDTV") || upper.contains("REPUBLIC") || upper.contains("INDIA TV")) return "News"
                 if (upper.contains("SPORTS") || upper.contains("TEN ") || upper.contains("ESPN")) return "Sports"
-                if (upper.contains("MUSIC") || upper.contains("MTV") || upper.contains("VH1") || upper.contains("9XM") || upper.contains("ZING")) return "Music"
-                if (upper.contains("KIDS") || upper.contains("CARTOON") || upper.contains("POGO") || upper.contains("DISNEY") || upper.contains("NICK") || upper.contains("CHUTTI")) return "Kids & Cartoons"
+                if (upper.contains("MUSIC") || upper.contains("MTV") || upper.contains("VH1") || upper.contains("9XM") || upper.contains("ZING") || upper.contains("SANGEET")) return "Music"
                 if (upper.contains("DISCOVERY") || upper.contains("ANIMAL PLANET") || upper.contains("HISTORY") || upper.contains("NAT GEO") || upper.contains("NATIONAL GEOGRAPHIC")) return "Infotainment"
                 
                 // Final Fallback: use the first word of the channel (Capitalized neatly)
@@ -186,18 +190,18 @@ object M3uParser {
     }
 
     private fun getFolderBasePriority(folder: String): Int {
-        // Custom order: Star > Sony > Zee > Colors > Music > Kids & Cartoons > DD > Sun > News18 > ABP > Others
+        // Custom order: Star > Sony > Zee > Colors > Music > Cartoon > DD > Sun > News18 > ABP > Others
         return when (folder.uppercase()) {
             "STAR" -> 1
             "SONY" -> 2
             "ZEE" -> 3
             "COLORS" -> 4
             "MOVIES" -> 5
-            "MUSIC" -> 5
-            "KIDS & CARTOONS" -> 6
-            "DD" -> 7
-            "SUN" -> 8
-            "NEWS18" -> 9
+            "MUSIC" -> 6
+            "CARTOON" -> 7
+            "NEWS" -> 8
+            "DISCOVERY" -> 9
+            "SUN" -> 11
             "ABP" -> 10
             "OTHER CHANNELS", "OTHERS" -> 99
             else -> 20

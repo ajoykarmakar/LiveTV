@@ -24,12 +24,15 @@ object StreamHealthChecker {
                 val request = Request.Builder()
                     .url(variant.url)
                     .head() // HEAD is faster than GET
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
                     .header("Origin", "https://jiotv.com")
                     .header("Referer", "https://jiotv.com/")
+                    .header("Accept", "*/*")
                     .build()
                 client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful || response.isRedirect) {
+                    val code = response.code
+                    if (response.isSuccessful || response.isRedirect || code == 405 || code == 400) {
+                        // Some servers block HEAD with 405 or 400 but stream is still alive
                         return@withContext true
                     }
                 }
@@ -40,9 +43,10 @@ object StreamHealthChecker {
                         .url(variant.url)
                         .get()
                         .header("Range", "bytes=0-100")
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
                         .header("Origin", "https://jiotv.com")
                         .header("Referer", "https://jiotv.com/")
+                        .header("Accept", "*/*")
                         .build()
                     client.newCall(getReq).execute().use { response ->
                         if (response.isSuccessful || response.code == 206 || response.isRedirect) {

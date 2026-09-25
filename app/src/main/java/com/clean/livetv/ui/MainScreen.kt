@@ -340,11 +340,10 @@ fun DashboardCard(
 
 @Composable
 fun MediaLogo(name: String, logoUrl: String, modifier: Modifier = Modifier) {
-    // Assign specific icons to utility folders
     val systemIcon = when (name) {
         "All Channels" -> Icons.Default.PlayArrow
         "Most Watched" -> Icons.Default.Star
-        "Kids & Cartoons" -> Icons.Default.Face
+        "Cartoon" -> Icons.Default.Face
         "Other Channels", "Others", "Z Other Channels" -> Icons.AutoMirrored.Filled.List
         else -> null
     }

@@ -1,6 +1,8 @@
 package com.clean.livetv.data
 
 import android.content.Context
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,15 +26,17 @@ class PlaylistRepository(private val context: Context, private val engagementSto
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
                 .header("Origin", "https://jiotv.com")
                 .header("Referer", "https://jiotv.com/")
+                // Extremely aggressive Cache-Control for Github raw endpoints to prevent 304 timeouts
+                .header("Cache-Control", "max-stale=3600") 
                 .build()
             
             var response = chain.proceed(request)
             var tryCount = 0
-            while (!response.isSuccessful && tryCount < 3) {
+            while (!response.isSuccessful && tryCount < 2) { // Reduced retries to avoid extreme boot lag
                 tryCount++
                 response.close()
                 try {
-                    Thread.sleep((1000 * tryCount).toLong())
+                    Thread.sleep(500)
                 } catch (ignored: Exception) {}
                 response = chain.proceed(request)
             }
@@ -48,16 +52,30 @@ class PlaylistRepository(private val context: Context, private val engagementSto
     private val prefs = context.getSharedPreferences("playlist_prefs", Context.MODE_PRIVATE)
 
     suspend fun loadAndSync() = withContext(Dispatchers.IO) {
-        // 1. Boot Instantly: load from cache
-        loadFromCache()
+        // 1. Boot Instantly: ALWAYS load from the local JSON file FIRST
+        val cacheLoaded = loadFromCache()
 
-        // 2. Background Check
+        // 2. Perform Network Sync as a completely detached background process
+        // This ensures the UI never blocks while OkHttp handles GitHub latency/Etag checks
+        CoroutineScope(Dispatchers.IO).launch {
+            performBackgroundSync(cacheLoaded)
+        }
+    }
+
+    private suspend fun performBackgroundSync(cacheLoaded: Boolean) {
         val lastEtag = prefs.getString("etag", "") ?: ""
         val lastSync = prefs.getLong("last_sync", 0L)
-        val ttlMillis = 6 * 60 * 60 * 1000L // 6 hours
+        // Aggressive TTL: 24 hours (GitHub doesn't change playlists minute-to-minute)
+        val ttlMillis = 24 * 60 * 60 * 1000L 
 
         try {
             val isExpired = System.currentTimeMillis() - lastSync > ttlMillis
+            
+            // If we have a local cache and TTL isn't expired, we don't even need to ping GitHub
+            if (cacheLoaded && !isExpired) {
+                return 
+            }
+
             val requestBuilder = Request.Builder().url(playlistUrl).head()
             if (!isExpired && lastEtag.isNotEmpty()) {
                 requestBuilder.header("If-None-Match", lastEtag)
@@ -66,18 +84,23 @@ class PlaylistRepository(private val context: Context, private val engagementSto
             val headResponse = client.newCall(requestBuilder.build()).execute()
             
             // 3. Delta Sync
-            if (headResponse.code != 304 || isExpired) {
-                // Modified or expired, fetch it fully
+            if (headResponse.code != 304 || isExpired || !cacheLoaded) {
+                // Modified, expired, or cache is missing: Fetch fully
                 val newEtag = headResponse.header("ETag") ?: ""
                 headResponse.close()
                 fetchAndParseM3uWithRetry(newEtag)
             } else {
                 headResponse.close()
+                // Just update the sync timestamp so we don't hit Etag repeatedly today
+                prefs.edit().putLong("last_sync", System.currentTimeMillis()).apply()
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            // If head request fails due to no internet, try to fetch anyway or fallback to cache
-            fetchAndParseM3uWithRetry("")
+            // If HEAD fails due to no internet, and we already loaded cache, just silently fail.
+            // If cache was MISSING, then force a retry fetch.
+            if (!cacheLoaded) {
+                fetchAndParseM3uWithRetry("")
+            }
         }
     }
 
@@ -96,10 +119,12 @@ class PlaylistRepository(private val context: Context, private val engagementSto
         }
     }
 
-    private fun loadFromCache() {
+    private fun loadFromCache(): Boolean {
         if (cacheFile.exists()) {
             try {
                 val jsonStr = cacheFile.readText()
+                if (jsonStr.isEmpty() || jsonStr == "[]") return false
+                
                 val cachedGroups = Json.decodeFromString<List<ChannelGroup>>(jsonStr)
                 // We re-sort from cache on cold boot to ensure engagement score is applied
                 // because engagement score could have updated since last json caching.
@@ -116,10 +141,12 @@ class PlaylistRepository(private val context: Context, private val engagementSto
                     .thenBy { it.title })
 
                 _channelsFlow.value = updatedGroups
+                return true
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
+        return false
     }
 
     private suspend fun fetchAndParseM3u(newEtag: String) = withContext(Dispatchers.IO) {

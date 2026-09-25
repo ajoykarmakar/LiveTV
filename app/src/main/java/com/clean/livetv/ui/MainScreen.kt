@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.*
 import coil.compose.SubcomposeAsyncImage
 import androidx.compose.ui.Alignment
@@ -111,8 +112,15 @@ fun MainScreen(groups: List<ChannelGroup>, engagementStore: EngagementStore) {
             )
         } else {
             if (displayGroups.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(text = "Loading Channels...", color = Color.White)
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(40.dp),
+                        color = Color.White,
+                        strokeWidth = 3.dp
+                    )
                 }
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {

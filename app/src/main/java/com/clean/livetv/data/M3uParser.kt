@@ -119,8 +119,11 @@ object M3uParser {
         val resMatch = resRegex.find(rawName)
         val resolution = resMatch?.groupValues?.get(1) ?: "unknown"
 
-        // Remove EVERYTHING inside brackets or parentheses
-        var baseName = rawName.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "")
+        // Remove EVERYTHING inside brackets or parentheses AND explicitly " (Stream Quality)"
+        var baseName = rawName.replace(" (Stream Quality)", "", ignoreCase = true)
+        baseName = baseName.replace("Stream Quality", "", ignoreCase = true)
+        baseName = baseName.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "")
+        baseName = baseName.replace("()", "")
         
         // Remove standalone tags if they exist outside brackets
         baseName = baseName.replace(Regex("\\b(FHD|HD|SD|4K)\\b", RegexOption.IGNORE_CASE), "")
@@ -141,6 +144,16 @@ object M3uParser {
 
     private fun guessGroup(channelName: String): String {
         val upper = channelName.uppercase()
+        
+        // Prioritize Movies over brand networks so all movie channels go here
+        if (upper.contains("MOVIE") || upper.contains("CINEMA") || 
+            upper.contains("PICTURES") || upper.contains("GOLD") || 
+            upper.contains("MAX") || upper.contains("CINEPLEX") || 
+            upper.contains("BOLLYWOOD") || upper.contains("ACTION") || 
+            upper.contains("FILM") || upper.contains("TALKIES")) {
+            return "Movies"
+        }
+
         return when {
             upper.startsWith("STAR") -> "Star"
             upper.startsWith("SONY") -> "Sony"
@@ -161,7 +174,6 @@ object M3uParser {
                 // Genre-based grouping if no specific brand matches
                 if (upper.contains("NEWS") || upper.contains("AAJ TAK") || upper.contains("NDTV") || upper.contains("REPUBLIC") || upper.contains("INDIA TV")) return "News"
                 if (upper.contains("SPORTS") || upper.contains("TEN ") || upper.contains("ESPN")) return "Sports"
-                if (upper.contains("MOVIE") || upper.contains("CINEMA") || upper.contains("PICTURES") || upper.contains("GOLD")) return "Movies"
                 if (upper.contains("MUSIC") || upper.contains("MTV") || upper.contains("VH1") || upper.contains("9XM") || upper.contains("ZING")) return "Music"
                 if (upper.contains("KIDS") || upper.contains("CARTOON") || upper.contains("POGO") || upper.contains("DISNEY") || upper.contains("NICK") || upper.contains("CHUTTI")) return "Kids & Cartoons"
                 if (upper.contains("DISCOVERY") || upper.contains("ANIMAL PLANET") || upper.contains("HISTORY") || upper.contains("NAT GEO") || upper.contains("NATIONAL GEOGRAPHIC")) return "Infotainment"
@@ -180,6 +192,7 @@ object M3uParser {
             "SONY" -> 2
             "ZEE" -> 3
             "COLORS" -> 4
+            "MOVIES" -> 5
             "MUSIC" -> 5
             "KIDS & CARTOONS" -> 6
             "DD" -> 7

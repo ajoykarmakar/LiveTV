@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -169,7 +170,25 @@ fun PlayerScreen(channel: Channel, onBack: (Long) -> Unit) {
         onBack(watchSeconds)
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    // Auto-hide back button logic
+    LaunchedEffect(isControlsVisible) {
+        if (isControlsVisible) {
+            delay(3000)
+            isControlsVisible = false
+        }
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black).pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    // Any touch shows controls
+                    isControlsVisible = true
+                }
+            }
+        }
+    ) {
         if (errorMessage == null && currentVariantIndex < channel.variants.size) {
             AndroidView(
                 factory = { ctx ->

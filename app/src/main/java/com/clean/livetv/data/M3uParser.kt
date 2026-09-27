@@ -5,10 +5,11 @@ import java.io.InputStream
 import java.io.InputStreamReader
 
 object M3uParser {
-    fun parse(inputStream: InputStream, engagementStore: EngagementStore): List<ChannelGroup> {
+    fun parse(inputStream: InputStream, engagementStore: EngagementStore, logosMap: Map<String, String> = emptyMap()): List<ChannelGroup> {
         val channels = mutableListOf<Channel>()
         var currentName = ""
         var currentLogoUrl = ""
+        var currentTvgId = ""
         
         val reader = BufferedReader(InputStreamReader(inputStream))
         var line: String? = reader.readLine()
@@ -17,6 +18,8 @@ object M3uParser {
             line = line.trim()
             if (line.startsWith("#EXTINF:")) {
                 currentLogoUrl = extractAttribute(line, "tvg-logo")
+                currentTvgId = extractAttribute(line, "tvg-id")
+                
                 val commaIndex = line.lastIndexOf(',')
                 if (commaIndex != -1 && commaIndex + 1 < line.length) {
                     currentName = line.substring(commaIndex + 1).trim()
@@ -26,10 +29,21 @@ object M3uParser {
             } else if (!line.startsWith("#") && line.isNotEmpty()) {
                 if (currentName.isNotEmpty()) {
                     val (baseName, resolution) = parseNameAndResolution(currentName)
+                    
+                    // Resolve logo using tvg-id mapping, fallback to parsed tvg-logo
+                    var resolvedLogo = ""
+                    if (currentTvgId.isNotEmpty()) {
+                        val pureId = currentTvgId.substringBefore("@")
+                        resolvedLogo = logosMap[pureId] ?: ""
+                    }
+                    if (resolvedLogo.isEmpty()) {
+                        resolvedLogo = currentLogoUrl
+                    }
+
                     channels.add(
                         Channel(
                             name = baseName,
-                            logoUrl = currentLogoUrl,
+                            logoUrl = resolvedLogo,
                             groupTitle = "", // We will guess this later
                             variants = listOf(ChannelVariant(url = line, resolution = resolution))
                         )
@@ -37,6 +51,7 @@ object M3uParser {
                 }
                 currentName = ""
                 currentLogoUrl = ""
+                currentTvgId = ""
             }
             line = reader.readLine()
         }
@@ -44,22 +59,25 @@ object M3uParser {
         // Variant Merging
         val groupedByName = channels.groupBy { it.name }
         val mergedChannels = groupedByName.map { (name, channelList) ->
-            val first = channelList.first()
             val allVariants = channelList.flatMap { it.variants }.sortedByDescending { parseResInt(it.resolution) }
             
-            // Override with Wikipedia Logo if available, else fallback to M3U logo
-            val wikiLogo = getChannelWikipediaLogo(name)
-            val logo = wikiLogo ?: first.logoUrl.ifEmpty { channelList.find { it.logoUrl.isNotEmpty() }?.logoUrl ?: "" }
+            // Try to find a logo from the channel list, fallback to our massive GitHub repo, or keep empty
+            val listLogo = channelList.find { it.logoUrl.isNotEmpty() }?.logoUrl ?: ""
+            val logo = listLogo.ifEmpty { getGithubLogoUrl(name) ?: "" }
             
             val group = guessGroup(name)
             val score = engagementStore.getScore(name)
+
+            // Calculate if the channel supports HD
+            val hasHd = allVariants.any { parseResInt(it.resolution) >= 720 } || name.uppercase().contains("HD")
 
             Channel(
                 name = name,
                 logoUrl = logo,
                 groupTitle = group,
                 variants = allVariants,
-                engagementScore = score
+                engagementScore = score,
+                hasHdOrHigher = hasHd
             )
         }
 
@@ -72,7 +90,7 @@ object M3uParser {
         groups.forEach { (title, list) ->
             if ((list.size == 1 && title != "Cartoon") || title == "Others" || title == "Other Channels") {
                 // Single-channel folders go into "Other Channels"
-                val updatedList = list.map { it.copy(groupTitle = "Z Other Channels") }
+                val updatedList = list.map { it.copy(groupTitle = "Other Channels") }
                 otherChannelsList.addAll(updatedList)
             } else {
                 // Sort channels inside folder: Engagement > Flagship > Name
@@ -216,141 +234,12 @@ object M3uParser {
         return 5
     }
 
-    private fun getChannelWikipediaLogo(channelName: String): String? {
-        // Match Indian television channels directly to their Wikipedia logos.
-        // Data sourced from https://en.wikipedia.org/wiki/Lists_of_television_channels_in_India
-        val cleanName = channelName.uppercase().trim()
-        val filename = when {
-            // Star Network
-            cleanName == "STAR PLUS" -> "Star_Plus_logo.svg"
-            cleanName == "STAR BHARAT" -> "Star_Bharat_logo.svg"
-            cleanName == "STAR UTSAV" -> "Star_Utsav_logo.png"
-            cleanName == "STAR GOLD" -> "Star_Gold_logo.svg"
-            cleanName == "STAR MOVIES" -> "Star_Movies_logo.svg"
-            cleanName == "STAR WORLD" -> "Star_World_logo.svg"
-            cleanName == "STAR SPORTS 1" -> "Star_Sports_1_logo.svg"
-            cleanName == "STAR SPORTS 2" -> "Star_Sports_2_logo.svg"
-            cleanName == "STAR SPORTS 3" -> "Star_Sports_3_logo.svg"
-            cleanName.startsWith("STAR SPORTS") -> "Star_Sports_Logo.svg"
-            cleanName == "STAR VIJAY" -> "Star_Vijay_logo.svg"
-            cleanName == "STAR JALSHA" -> "Star_Jalsha_logo.svg"
-            cleanName == "STAR PRAVAH" -> "Star_Pravah_logo.svg"
-            cleanName == "STAR MAA" -> "Star_Maa_logo.svg"
-            cleanName == "STAR SUVARNA" -> "Star_Suvarna_logo.svg"
-            cleanName == "ASIANET" -> "Asianet_logo.svg"
-
-            // Sony Network
-            cleanName == "SONY ENTERTAINMENT TELEVISION" || cleanName == "SET" -> "SET_India_logo.svg"
-            cleanName == "SONY SAB" || cleanName == "SAB TV" -> "Sony_SAB_logo.svg"
-            cleanName == "SONY PAL" -> "Sony_Pal_logo.svg"
-            cleanName == "SONY MAX" -> "Sony_Max_logo.svg"
-            cleanName == "SONY PIX" -> "Sony_PIX_logo.svg"
-            cleanName == "SONY SIX" -> "Sony_SIX_logo.svg"
-            cleanName.startsWith("SONY SPORTS") -> "Sony_Sports_Network_logo.svg"
-            cleanName == "SONY YAY" || cleanName == "SONY YAY!" -> "Sony_Yay_logo.svg"
-
-            // Zee Network
-            cleanName == "ZEE TV" -> "Zee_TV_logo.svg"
-            cleanName == "ZEE CINEMA" -> "Zee_Cinema_logo.svg"
-            cleanName == "ZEE BOLLYWOOD" -> "Zee_Bollywood_logo.svg"
-            cleanName == "ZEE ACTION" -> "Zee_Action_logo.svg"
-            cleanName == "ZEE ANMOL" -> "Zee_Anmol_logo.svg"
-            cleanName == "ZEE CAFE" -> "Zee_Cafe_logo.svg"
-            cleanName == "ZEE ZEST" -> "Zee_Zest_logo.svg"
-            cleanName == "ZEE NEWS" -> "Zee_News_logo.svg"
-            cleanName == "ZEE BUSINESS" -> "Zee_Business_logo.svg"
-            cleanName == "ZEE MARATHI" -> "Zee_Marathi_logo.svg"
-            cleanName == "ZEE BANGLA" -> "Zee_Bangla_logo.svg"
-            cleanName == "ZEE TAMIZH" -> "Zee_Tamil_logo.svg"
-            cleanName == "ZEE TELUGU" -> "Zee_Telugu_logo.svg"
-            cleanName == "ZEE KANNADA" -> "Zee_Kannada_logo.svg"
-            cleanName == "ZEE KERALAM" -> "Zee_Keralam_logo.svg"
-            cleanName == "&TV" || cleanName == "AND TV" -> "And_TV_logo.svg"
-            cleanName == "&PICTURES" || cleanName == "AND PICTURES" -> "Andpictures_logo.svg"
-
-            // Viacom18 / Colors
-            cleanName == "COLORS" || cleanName == "COLORS TV" -> "Colors_TV_logo.svg"
-            cleanName == "COLORS RISHTEY" -> "Colors_Rishtey_logo.svg"
-            cleanName == "COLORS CINEPLEX" -> "Colors_Cineplex_logo.svg"
-            cleanName == "COLORS INFINITY" -> "Colors_Infinity_logo.svg"
-            cleanName == "MTV" || cleanName == "MTV INDIA" -> "MTV_India_logo.svg"
-            cleanName == "MTV BEATS" -> "MTV_Beats_logo.svg"
-            cleanName == "VH1" || cleanName == "VH1 INDIA" -> "VH1_India_logo.svg"
-            cleanName == "NICKELODEON" || cleanName == "NICK" -> "Nickelodeon_logo.svg"
-            cleanName == "NICK JR" || cleanName == "NICK JR." -> "Nick_Jr_logo.svg"
-            cleanName == "SONIC" || cleanName == "SONIC NICKELODEON" -> "Sonic_Nickelodeon_logo.svg"
-            cleanName == "COLORS MARATHI" -> "Colors_Marathi_logo.svg"
-            cleanName == "COLORS KANNADA" -> "Colors_Kannada_logo.svg"
-            cleanName == "COLORS BANGLA" -> "Colors_Bangla_logo.svg"
-            cleanName == "COLORS GUJARATI" -> "Colors_Gujarati_logo.svg"
-
-            // News & Regional
-            cleanName == "AAJ TAK" -> "Aaj_Tak_logo.svg"
-            cleanName == "INDIA TODAY" -> "India_Today_logo.svg"
-            cleanName == "ABP NEWS" -> "ABP_News_logo.svg"
-            cleanName == "ABP MAJHA" -> "ABP_Majha_logo.svg"
-            cleanName == "ABP ANANDA" -> "ABP_Ananda_logo.svg"
-            cleanName == "NEWS18 INDIA" -> "News18_India_logo.svg"
-            cleanName == "CNN NEWS18" || cleanName == "CNN-NEWS18" -> "CNN-News18_logo.svg"
-            cleanName == "INDIA TV" -> "India_TV_logo.svg"
-            cleanName == "REPUBLIC TV" -> "Republic_TV_logo.svg"
-            cleanName == "REPUBLIC BHARAT" -> "Republic_Bharat_logo.svg"
-            cleanName == "NDTV 24X7" -> "NDTV_24x7_logo.svg"
-            cleanName == "NDTV INDIA" -> "NDTV_India_logo.svg"
-            cleanName == "TIMES NOW" -> "Times_Now_logo.svg"
-            cleanName == "MIRROR NOW" -> "Mirror_Now_logo.svg"
-            cleanName == "ET NOW" -> "ET_Now_logo.svg"
-            cleanName == "PTC PUNJABI" -> "PTC_Punjabi_Logo.png"
-
-            // Kids & Infotainment
-            cleanName == "CARTOON NETWORK" -> "Cartoon_Network_logo.svg"
-            cleanName == "POGO" || cleanName == "POGO TV" -> "Pogo_TV_logo.svg"
-            cleanName == "DISNEY CHANNEL" -> "Disney_Channel_logo.svg"
-            cleanName == "DISNEY JUNIOR" -> "Disney_Junior_logo.svg"
-            cleanName == "HUNGAMA TV" -> "Hungama_TV_logo.svg"
-            cleanName == "DISCOVERY CHANNEL" || cleanName == "DISCOVERY" -> "Discovery_Channel_logo.svg"
-            cleanName == "ANIMAL PLANET" -> "Animal_Planet_logo.svg"
-            cleanName == "TLC" -> "TLC_logo.svg"
-            cleanName == "NATIONAL GEOGRAPHIC" || cleanName == "NAT GEO" -> "National_Geographic_Logo.svg"
-            cleanName == "NAT GEO WILD" -> "Nat_Geo_Wild_logo.svg"
-            cleanName == "HISTORY TV18" -> "History_TV18_logo.svg"
-
-            // Sun & Southern
-            cleanName == "SUN TV" -> "Sun_TV_logo.svg"
-            cleanName == "KTV" -> "KTV_logo.svg"
-            cleanName == "SUN MUSIC" -> "Sun_Music_logo.svg"
-            cleanName == "SUN NEWS" -> "Sun_News_logo.svg"
-            cleanName == "CHUTTI TV" -> "Chutti_TV_logo.svg"
-            cleanName == "ADITHYA TV" -> "Adithya_TV_logo.svg"
-            cleanName == "GEMINI TV" -> "Gemini_TV_logo.svg"
-            cleanName == "UDAYA TV" -> "Udaya_TV_logo.svg"
-            cleanName == "SURYA TV" -> "Surya_TV_logo.svg"
-            cleanName.startsWith("ETV") -> "ETV_Network_logo.png"
-
-            // Music & Movies
-            cleanName == "9XM" -> "9XM_logo.png"
-            cleanName == "9X JALWA" -> "9X_Jalwa_logo.png"
-            cleanName == "B4U MOVIES" -> "B4U_Movies_logo.svg"
-            cleanName == "B4U MUSIC" -> "B4U_Music_logo.svg"
-            cleanName == "B4U KADAK" -> "B4U_Kadak_logo.svg"
-            cleanName == "BINDASS" -> "Bindass_logo.svg"
-            cleanName == "ZOOM" -> "Zoom_TV_logo.svg"
-
-            // Doordarshan
-            cleanName == "DD NATIONAL" -> "DD_National_logo.svg"
-            cleanName == "DD NEWS" -> "DD_News_logo.svg"
-            cleanName == "DD SPORTS" -> "DD_Sports_logo.svg"
-            cleanName == "DD BHARATI" -> "DD_Bharati_logo.svg"
-            cleanName == "DD KISAN" -> "DD_Kisan_logo.svg"
-            cleanName.startsWith("DD ") -> "Doordarshan_Logo.svg"
-
-            else -> null
-        }
+    private fun getGithubLogoUrl(channelName: String): String {
+        // Generate the exact file name format expected by the GitHub Repo
+        // Example: "Sony MAX" -> "Sony_MAX.png", "&TV" -> "&TV.png", "Aaj Tak HD" -> "Aaj_Tak_HD.png"
+        val filename = channelName.trim().replace(" ", "_") + ".png"
         
-        return if (filename != null) {
-            "https://en.wikipedia.org/wiki/Special:FilePath/$filename"
-        } else {
-            null
-        }
+        // We construct the raw GitHub content URL by appending it
+        return "https://raw.githubusercontent.com/amjiddader/tv_logo/master/India/$filename"
     }
 }

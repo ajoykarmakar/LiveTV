@@ -41,6 +41,7 @@ import com.clean.livetv.data.ChannelGroup
 import com.clean.livetv.data.EngagementStore
 import com.clean.livetv.data.StreamHealthChecker
 import com.clean.livetv.data.StreamStatus
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 
@@ -71,11 +72,13 @@ fun MainScreen(groups: List<ChannelGroup>, engagementStore: EngagementStore) {
             .filter { it.engagementScore > 0f }
             .sortedByDescending { it.engagementScore }
             .take(15)
+            
 
         val newGroups = mutableListOf<ChannelGroup>()
         if (sortedByPopularity.isNotEmpty()) {
             newGroups.add(ChannelGroup("Most Watched", sortedByPopularity))
         }
+
         newGroups.addAll(groups)
         
         newGroups
@@ -239,11 +242,11 @@ fun DashboardCard(
 ) {
     var streamStatus by remember { mutableStateOf(StreamStatus.CHECKING) }
 
+    // High Performance Detached Checking
     LaunchedEffect(channel) {
         if (channel != null) {
-            streamStatus = StreamStatus.CHECKING
-            val isOnline = StreamHealthChecker.checkChannel(channel)
-            streamStatus = if (isOnline) StreamStatus.ONLINE else StreamStatus.OFFLINE
+            delay(800) // Don't block UI if user is fast scrolling!
+            streamStatus = StreamHealthChecker.checkChannel(channel)
         }
     }
 
@@ -265,72 +268,93 @@ fun DashboardCard(
             focusedBorder = Border(border = BorderStroke(2.dp, Color.White))
         )
     ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = if (isMobile) 16.dp else 24.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Start
-        ) {
-            Box {
-                MediaLogo(
-                    name = folderNameForSystemIcon ?: title,
-                    logoUrl = logoUrl,
-                    modifier = Modifier.size(if (isMobile) 40.dp else 42.dp)
-                )
-                
-                // Status Indicator Badge (Only for Channels)
-                if (channel != null) {
-                    val statusColor = when (streamStatus) {
-                        StreamStatus.ONLINE -> Color(0xFF4CAF50) // Green
-                        StreamStatus.OFFLINE -> Color(0xFFF44336) // Red
-                        StreamStatus.CHECKING -> Color.Gray
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .align(Alignment.TopEnd)
-                            .offset(x = 4.dp, y = (-4).dp)
-                            .clip(CircleShape)
-                            .background(statusColor)
-                            .border(1.5.dp, Color(0xFF1E242B), CircleShape)
+        Box(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.fillMaxSize().padding(horizontal = if (isMobile) 16.dp else 24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start
+            ) {
+                Box {
+                    MediaLogo(
+                        name = folderNameForSystemIcon ?: title,
+                        logoUrl = logoUrl,
+                        modifier = Modifier.size(if (isMobile) 40.dp else 42.dp)
                     )
+                    
+                    // Status Indicator Badge (Only for Channels)
+                    if (channel != null) {
+                        val statusColor = when (streamStatus) {
+                            StreamStatus.ONLINE -> Color(0xFF4CAF50) // Green
+                            StreamStatus.OFFLINE -> Color(0xFFF44336) // Red
+                            StreamStatus.CHECKING -> Color.Gray
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .align(Alignment.TopEnd)
+                                .offset(x = 4.dp, y = (-4).dp)
+                                .clip(CircleShape)
+                                .background(statusColor)
+                                .border(1.5.dp, Color(0xFF1E242B), CircleShape)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(20.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = if (subtitle != null) 1 else 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (subtitle != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else if (channel != null) {
+                        // Show text status for channels
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = when (streamStatus) {
+                                StreamStatus.ONLINE -> "Online"
+                                StreamStatus.OFFLINE -> "Offline"
+                                StreamStatus.CHECKING -> "Checking..."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = when (streamStatus) {
+                                StreamStatus.ONLINE -> Color(0xFF4CAF50)
+                                StreamStatus.OFFLINE -> Color(0xFFF44336)
+                                StreamStatus.CHECKING -> Color.Gray
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
-            Spacer(modifier = Modifier.width(20.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = if (subtitle != null) 1 else 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (subtitle != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
+
+            // Top Right HD Badge
+            if (channel != null && channel.hasHdOrHigher && streamStatus == StreamStatus.ONLINE) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFF293D52))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
                     Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                } else if (channel != null) {
-                    // Show text status for channels
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = when (streamStatus) {
-                            StreamStatus.ONLINE -> "Online"
-                            StreamStatus.OFFLINE -> "Offline"
-                            StreamStatus.CHECKING -> "Checking..."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = when (streamStatus) {
-                            StreamStatus.ONLINE -> Color(0xFF4CAF50)
-                            StreamStatus.OFFLINE -> Color(0xFFF44336)
-                            StreamStatus.CHECKING -> Color.Gray
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = "HD",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -344,7 +368,8 @@ fun MediaLogo(name: String, logoUrl: String, modifier: Modifier = Modifier) {
         "All Channels" -> Icons.Default.PlayArrow
         "Most Watched" -> Icons.Default.Star
         "Cartoon" -> Icons.Default.Face
-        "Other Channels", "Others", "Z Other Channels" -> Icons.AutoMirrored.Filled.List
+        "HD Channels" -> Icons.Default.Star
+        "Other Channels", "Other" -> Icons.AutoMirrored.Filled.List
         else -> null
     }
 
@@ -365,6 +390,8 @@ fun MediaLogo(name: String, logoUrl: String, modifier: Modifier = Modifier) {
             SubcomposeAsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(logoUrl)
+                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+                    .addHeader("Referer", "https://jiotv.com/")
                     .crossfade(true)
                     .build(),
                 contentDescription = null,

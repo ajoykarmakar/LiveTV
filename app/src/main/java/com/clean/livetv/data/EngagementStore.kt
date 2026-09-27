@@ -13,15 +13,28 @@ import kotlinx.coroutines.runBlocking
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "engagement")
 
 class EngagementStore(private val context: Context) {
+    // Pre-loaded in-memory cache to prevent blocking the Main Thread
+    private var prefsCache: Preferences? = null
+
+    suspend fun cachePreferences() {
+        prefsCache = context.dataStore.data.first()
+    }
+
     fun getScore(channelName: String): Float {
         val openKey = intPreferencesKey("open_$channelName")
         val watchKey = longPreferencesKey("watch_$channelName")
         
-        val (openCount, watchSeconds) = runBlocking {
-            val prefs = context.dataStore.data.first()
-            val o = prefs[openKey] ?: 0
-            val w = prefs[watchKey] ?: 0L
-            Pair(o, w)
+        val openCount: Int
+        val watchSeconds: Long
+        if (prefsCache != null) {
+            openCount = prefsCache!![openKey] ?: 0
+            watchSeconds = prefsCache!![watchKey] ?: 0L
+        } else {
+            runBlocking {
+                val prefs = context.dataStore.data.first()
+                openCount = prefs[openKey] ?: 0
+                watchSeconds = prefs[watchKey] ?: 0L
+            }
         }
         
         val watchMinutes = watchSeconds / 60f

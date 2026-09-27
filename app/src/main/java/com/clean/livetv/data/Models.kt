@@ -3,6 +3,12 @@ package com.clean.livetv.data
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class LogoItem(
+    val channel: String? = null,
+    val url: String? = null
+)
+
+@Serializable
 data class ChannelVariant(
     val url: String,
     val resolution: String // e.g., "1080p", "720p", or "unknown"

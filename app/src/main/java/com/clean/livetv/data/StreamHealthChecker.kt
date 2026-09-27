@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 
 enum class StreamStatus {
     CHECKING,
@@ -14,11 +15,17 @@ enum class StreamStatus {
 
 object StreamHealthChecker {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
         .build()
 
-    suspend fun checkChannel(channel: Channel): Boolean = withContext(Dispatchers.IO) {
+    // Cache results so we don't spam requests when scrolling up and down
+    private val statusCache = ConcurrentHashMap<String, StreamStatus>()
+
+    suspend fun checkChannel(channel: Channel): StreamStatus = withContext(Dispatchers.IO) {
+        val cached = statusCache[channel.name]
+        if (cached != null) return@withContext cached
+
         for (variant in channel.variants) {
             try {
                 val request = Request.Builder()
@@ -32,8 +39,8 @@ object StreamHealthChecker {
                 client.newCall(request).execute().use { response ->
                     val code = response.code
                     if (response.isSuccessful || response.isRedirect || code == 405 || code == 400) {
-                        // Some servers block HEAD with 405 or 400 but stream is still alive
-                        return@withContext true
+                        statusCache[channel.name] = StreamStatus.ONLINE
+                        return@withContext StreamStatus.ONLINE
                     }
                 }
             } catch (e: Exception) {
@@ -50,7 +57,8 @@ object StreamHealthChecker {
                         .build()
                     client.newCall(getReq).execute().use { response ->
                         if (response.isSuccessful || response.code == 206 || response.isRedirect) {
-                            return@withContext true
+                            statusCache[channel.name] = StreamStatus.ONLINE
+                            return@withContext StreamStatus.ONLINE
                         }
                     }
                 } catch (e2: Exception) {
@@ -58,6 +66,7 @@ object StreamHealthChecker {
                 }
             }
         }
-        return@withContext false
+        statusCache[channel.name] = StreamStatus.OFFLINE
+        return@withContext StreamStatus.OFFLINE
     }
 }

@@ -1,6 +1,8 @@
 package com.clean.livetv.ui
 
+import android.content.Context
 import androidx.activity.compose.BackHandler
+import androidx.core.content.edit
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -59,9 +61,20 @@ fun AppBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.(
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun MainScreen(groups: List<ChannelGroup>, engagementStore: EngagementStore) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
+    var isFirstLaunch by remember { mutableStateOf(prefs.getBoolean("is_first_launch", true)) }
+
     val coroutineScope = rememberCoroutineScope()
     var selectedChannel by remember { mutableStateOf<Channel?>(null) }
     var selectedGroup by remember { mutableStateOf<ChannelGroup?>(null) }
+
+    LaunchedEffect(groups) {
+        if (groups.isNotEmpty() && isFirstLaunch) {
+            prefs.edit { putBoolean("is_first_launch", false) }
+            isFirstLaunch = false
+        }
+    }
 
     // Stability Rule: we only snapshot the display groups on initial load or cold start.
     val displayGroups = remember(groups) {
@@ -119,11 +132,25 @@ fun MainScreen(groups: List<ChannelGroup>, engagementStore: EngagementStore) {
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(40.dp),
-                        color = Color.White,
-                        strokeWidth = 3.dp
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(40.dp),
+                            color = Color.White,
+                            strokeWidth = 3.dp
+                        )
+                        if (isFirstLaunch) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "We are setting up the app for you, please wait a little...",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
                 }
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {

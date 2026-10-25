@@ -20,6 +20,11 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+        // Aggressive size reduction: Keep only English resources
+        // Drops hundreds of KB of translations built into AndroidX & Compose
+        androidResources {
+            localeFilters.add("en")
+        }
     }
 
     buildTypes {
@@ -38,12 +43,31 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = false
+        resValues = false
+        shaders = false
+    }
+    packaging {
+        resources {
+            // Strip out tiny useless metadata files added by kotlin and other libraries
+            excludes.add("/META-INF/{AL2.0,LGPL2.1}")
+            excludes.add("/META-INF/DEPENDENCIES")
+            excludes.add("/META-INF/LICENSE")
+            excludes.add("/META-INF/LICENSE.txt")
+            excludes.add("/META-INF/license.txt")
+            excludes.add("/META-INF/NOTICE")
+            excludes.add("/META-INF/NOTICE.txt")
+            excludes.add("/META-INF/notice.txt")
+            excludes.add("/*.kotlin_module")
+            excludes.add("/META-INF/*.kotlin_module")
+            excludes.add("**/kotlin/**")
+            excludes.add("**/*.version")
+        }
     }
 }
 
 dependencies {
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
     
     // Compose
     implementation(platform(libs.androidx.compose.bom))

@@ -2,6 +2,8 @@
 
 A highly optimized, blazing-fast Live TV application built entirely with modern Android development standards. Designed to run flawlessly on both Android Mobile and Android TV devices, this app provides a seamless streaming experience with intelligent caching, dynamic playlist parsing, and an adaptive user interface.
 
+Download and try from here [Live TV](https://github.com/ajoykarmakar/LiveTV/blob/main/app/release/app-release.apk)
+
 ## ✨ Key Features
 
 *   **📱📺 Adaptive Jetpack Compose UI**: A unified, responsive codebase utilizing Compose Material 3 and Compose for TV to provide a native experience across phones, tablets, and televisions.

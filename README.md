@@ -2,7 +2,7 @@
 
 A highly optimized, blazing-fast Live TV application built entirely with modern Android development standards. Designed to run flawlessly on both Android Mobile and Android TV devices, this app provides a seamless streaming experience with intelligent caching, dynamic playlist parsing, and an adaptive user interface.
 
-Download and try from here [Live TV](https://github.com/ajoykarmakar/LiveTV/blob/main/app/release/app-release.apk)
+Download and try from here [Live TV](https://github.com/ajoykarmakar/LiveTV/raw/refs/heads/main/app/release/app-release.apk)
 
 ## ✨ Key Features
 
